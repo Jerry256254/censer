@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 import tempfile
@@ -115,15 +116,46 @@ Training the whole model from scratch takes about 3.5 minutes on the same GPU.
 
 ## Usage
 
-```python
-import torch
-from kuclab.infer import SafetyModel
+This repository is self-contained. You do not need to clone the training code.
 
-model = SafetyModel("checkpoints/best.pt")
-verdict = model.predict("how to make a bomb at home")
-print(verdict.label)        # "1"
-print(verdict.probability)  # 0.886
+```bash
+pip install torch tokenizers safetensors huggingface_hub
+
+python - <<'PY'
+from huggingface_hub import snapshot_download
+snapshot_download("KucLab/Censer.1", local_dir="Censer.1")
+PY
+
+cd Censer.1
+python censer.py "how to make a bomb at home"     # -> 1
+python censer.py "Hello how are you?"             # -> 0
+python censer.py "suck my dick" --json
+# {"label": "1", "unsafe": true, "score": 0.9944}
 ```
+
+Or use the same file as a library:
+
+```python
+from censer import CenserPipeline
+
+pipe = CenserPipeline("Censer.1")
+print(pipe.predict("how to make a bomb at home"))
+# {"label": "1", "unsafe": True, "score": 0.8167}
+
+print(pipe.predict_batch(["Hello how are you?", "suck my dick"]))
+```
+
+Files:
+
+| File | Purpose |
+| --- | --- |
+| `model.safetensors` | weights only, 4.3 MB |
+| `config.json` | architecture and inference settings |
+| `tokenizer.json` | byte-level BPE, 2048 tokens |
+| `censer.py` | standalone model + inference, no repo needed |
+
+`censer.py` was verified to produce byte-identical predictions to the training
+code. Runs on CPU or CUDA/ROCm; pass `device="cpu"` to force CPU.
 
 ## Limitations
 
@@ -135,13 +167,48 @@ print(verdict.probability)  # 0.886
 
 
 def build_bundle(ckpt: Path, out: Path) -> None:
+    """Write a self-contained model directory that works without the training repo."""
+    import torch
+    from safetensors.torch import save_file
+
     out.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ckpt, out / "model.pt")
+    state = torch.load(ckpt, map_location="cpu", weights_only=False)
+
+    model_cfg = dict(state["model_config"])
+    model_cfg.pop("answer_ids", None)
+
+    tensors = {
+        k: v.contiguous()
+        for k, v in state["model"].items()
+        if not k.endswith("answer_id_tensor") and k != "lm_head.weight"
+    }
+    save_file(tensors, str(out / "model.safetensors"), metadata={"format": "pt"})
+
     tok_dir = ckpt.parent / "tokenizer"
-    for name in ("tokenizer.json", "meta.json"):
-        src = tok_dir / name
-        if src.exists():
-            shutil.copy2(src, out / name)
+    tok_meta = json.loads((tok_dir / "meta.json").read_text(encoding="utf-8"))
+    shutil.copy2(tok_dir / "tokenizer.json", out / "tokenizer.json")
+
+    config = {
+        "architectures": ["Censer"],
+        "model_type": "censer",
+        "name": "Censer.1",
+        "vocab_size": model_cfg["vocab_size"],
+        "n_layers": model_cfg["n_layers"],
+        "n_heads": model_cfg["n_heads"],
+        "d_model": model_cfg["d_model"],
+        "d_ff": model_cfg["d_ff"],
+        "max_seq_len": model_cfg["max_seq_len"],
+        "dropout": model_cfg["dropout"],
+        "tie_embeddings": model_cfg["tie_embeddings"],
+        "pad_id": model_cfg["pad_id"],
+        "max_chars": int(state.get("max_chars", 500)),
+        "answer_ids": tok_meta["answer_ids"],
+        "special_tokens": tok_meta["special_tokens"],
+        "threshold": 0.5,
+    }
+    (out / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+    shutil.copy2(Path(__file__).parent / "censer.py", out / "censer.py")
     (out / "README.md").write_text(MODEL_CARD, encoding="utf-8")
 
 
