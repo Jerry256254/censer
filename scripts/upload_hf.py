@@ -39,6 +39,27 @@ metrics:
 A 1.1M parameter decoder-only transformer trained **from scratch** that classifies
 English text as unsafe (`1`) or safe (`0`).
 
+## Download
+
+The whole model is `model.safetensors` (4.5 MB). Grab the files directly:
+
+| File | Download |
+| --- | --- |
+| **model.safetensors** | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/model.safetensors?download=true) |
+| config.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/config.json?download=true) |
+| tokenizer.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/tokenizer.json?download=true) |
+| censer.py | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/censer.py?download=true) |
+
+Or fetch everything at once:
+
+```bash
+pip install -U huggingface_hub
+hf download KucLab/Censer.1 --local-dir Censer.1
+```
+
+A single file (`README.md`, `config.json`, ...) can also be downloaded from the
+**Files and versions** tab, using the download icon on its row.
+
 It is not a fine-tuned encoder and not an API wrapper. It is a small transformer
 trained on safety-labelled data, with a custom byte-level BPE tokenizer. The model
 predicts a single answer token and never generates free text.
