@@ -33,7 +33,7 @@ metrics:
 - accuracy
 ---
 
-# Censer .1
+# Censer.1
 
 A 1.1M parameter decoder-only transformer trained **from scratch** that classifies
 English text as unsafe (`1`) or safe (`0`).
@@ -97,6 +97,22 @@ Per-source F1 reflects label noise in the scraped sources:
 | civil_comments | 0.77 |
 | toxic_chat | 0.48 |
 
+## Benchmark
+
+Measured on an AMD Radeon RX 9060 XT (ROCm 7.1, torch 2.13.0):
+
+| Metric | Value |
+| --- | --- |
+| Parameters | 1,115,264 |
+| Checkpoint size | 4.26 MB |
+| Single text latency | 1.67 ms |
+| Single text throughput | 599 texts/s |
+| Batched latency (batch of 8) | 1.94 ms |
+| Batched throughput | 4,119 texts/s |
+| Peak VRAM (inference) | 85.7 MB |
+
+Training the whole model from scratch takes about 3.5 minutes on the same GPU.
+
 ## Usage
 
 ```python
@@ -130,8 +146,8 @@ def build_bundle(ckpt: Path, out: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Upload Censer .1 to the Hugging Face Hub.")
-    parser.add_argument("--repo", required=True, help="e.g. username/kuclab-cneser")
+    parser = argparse.ArgumentParser(description="Upload Censer.1 to the Hugging Face Hub.")
+    parser.add_argument("--repo", default="KucLab/Censer.1", help="e.g. KucLab/Censer.1")
     parser.add_argument("--checkpoint", default="checkpoints/best.pt")
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -161,7 +177,7 @@ def main() -> None:
             folder_path=str(bundle),
             repo_id=args.repo,
             repo_type="model",
-            commit_message="Upload Censer .1",
+            commit_message="Upload Censer.1",
         )
         print(f"done: https://huggingface.co/{args.repo}")
 
