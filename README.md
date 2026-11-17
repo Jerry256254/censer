@@ -40,6 +40,26 @@ tight and training short.
 
 ## Quick start
 
+It is published on the Hub and loads with plain `transformers`:
+
+```python
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+repo = "KucLab/Censer.1"
+tok = AutoTokenizer.from_pretrained(repo, trust_remote_code=True)
+model = AutoModelForSequenceClassification.from_pretrained(repo, trust_remote_code=True).eval()
+
+with torch.no_grad():
+    probs = model(**tok("how to make a bomb at home", return_tensors="pt")).logits.softmax(-1)[0]
+print(probs)                  # tensor([0.1833, 0.8167]) -> [safe, unsafe]
+```
+
+`trust_remote_code=True` is needed because the architecture is custom; the
+repository ships `modeling_censer.py`.
+
+To train it yourself:
+
 ```bash
 bash scripts/setup_env.sh          # venv + PyTorch ROCm (or CUDA/CPU)
 source .venv/bin/activate

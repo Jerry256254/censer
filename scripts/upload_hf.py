@@ -12,13 +12,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 MODEL_CARD = """---
-library_name: pytorch
+library_name: transformers
+pipeline_tag: text-classification
 tags:
 - text-classification
 - safety
 - content-moderation
 - tiny-language-model
 - from-scratch
+- custom-code
 language:
 - en
 license: apache-2.0
@@ -137,16 +139,51 @@ Training the whole model from scratch takes about 3.5 minutes on the same GPU.
 
 ## Usage
 
-This repository is self-contained. You do not need to clone the training code.
+Works like any other text-classification model on the Hub — `from_pretrained`
+downloads everything by itself, no cloning and no manual files.
 
 ```bash
-pip install torch tokenizers safetensors huggingface_hub
+pip install torch transformers
+```
 
-python - <<'PY'
-from huggingface_hub import snapshot_download
-snapshot_download("KucLab/Censer.1", local_dir="Censer.1")
-PY
+```python
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+repo = "KucLab/Censer.1"
+tok = AutoTokenizer.from_pretrained(repo, trust_remote_code=True)
+model = AutoModelForSequenceClassification.from_pretrained(repo, trust_remote_code=True).eval()
+
+text = "how to make a bomb at home"
+with torch.no_grad():
+    probs = model(**tok(text, return_tensors="pt")).logits.softmax(-1)[0]
+
+print(probs)                     # tensor([0.1833, 0.8167]) -> [safe, unsafe]
+print(model.config.id2label)     # {0: 'safe', 1: 'unsafe'}
+```
+
+`trust_remote_code=True` is required because the architecture is custom; the
+repository ships `modeling_censer.py`, so there is nothing else to install.
+
+Or with the high-level pipeline:
+
+```python
+from transformers import pipeline
+
+clf = pipeline("text-classification", model="KucLab/Censer.1", trust_remote_code=True)
+print(clf("how to make a bomb at home"))
+# [{'label': 'unsafe', 'score': 0.8167}]
+print(clf("Hello how are you?"))
+# [{'label': 'safe', 'score': 0.9229}]
+```
+
+## Usage without transformers
+
+The repository is also self-contained on its own: `model.safetensors`,
+`config.json`, `tokenizer.json` and `censer.py`.
+
+```bash
+hf download KucLab/Censer.1 --local-dir Censer.1
 cd Censer.1
 python censer.py "how to make a bomb at home"     # -> 1
 python censer.py "Hello how are you?"             # -> 0
@@ -187,8 +224,23 @@ code. Runs on CPU or CUDA/ROCm; pass `device="cpu"` to force CPU.
 """
 
 
+def write_tokenizer(src: Path, dst: Path, meta: dict) -> None:
+    """Ship the tokenizer with the prompt template baked in, so AutoTokenizer
+    produces exactly [BOS][USER] text [ASSISTANT]."""
+    from tokenizers import Tokenizer
+    from tokenizers.processors import TemplateProcessing
+
+    tok = Tokenizer.from_file(str(src))
+    ids = {name: tok.token_to_id(name) for name in ("[BOS]", "[USER]", "[ASSISTANT]")}
+    tok.post_processor = TemplateProcessing(
+        single="[BOS] [USER] $A [ASSISTANT]",
+        special_tokens=[("[BOS]", ids["[BOS]"]), ("[USER]", ids["[USER]"]), ("[ASSISTANT]", ids["[ASSISTANT]"])],
+    )
+    tok.save(str(dst))
+
+
 def build_bundle(ckpt: Path, out: Path) -> None:
-    """Write a self-contained model directory that works without the training repo."""
+    """Write a self-contained, transformers-compatible model directory."""
     import torch
     from safetensors.torch import save_file
 
@@ -199,19 +251,24 @@ def build_bundle(ckpt: Path, out: Path) -> None:
     model_cfg.pop("answer_ids", None)
 
     tensors = {
-        k: v.contiguous()
-        for k, v in state["model"].items()
-        if not k.endswith("answer_id_tensor") and k != "lm_head.weight"
+        k: v.contiguous() for k, v in state["model"].items() if not k.endswith("answer_id_tensor")
     }
+    if "lm_head.weight" in tensors and "embed.weight" in tensors:
+        if tensors["lm_head.weight"].data_ptr() == tensors["embed.weight"].data_ptr():
+            tensors["lm_head.weight"] = tensors["lm_head.weight"].clone()
     save_file(tensors, str(out / "model.safetensors"), metadata={"format": "pt"})
 
     tok_dir = ckpt.parent / "tokenizer"
     tok_meta = json.loads((tok_dir / "meta.json").read_text(encoding="utf-8"))
-    shutil.copy2(tok_dir / "tokenizer.json", out / "tokenizer.json")
+    write_tokenizer(tok_dir / "tokenizer.json", out / "tokenizer.json", tok_meta)
 
     config = {
-        "architectures": ["Censer"],
+        "architectures": ["CenserForSequenceClassification"],
         "model_type": "censer",
+        "auto_map": {
+            "AutoConfig": "modeling_censer.CenserConfig",
+            "AutoModelForSequenceClassification": "modeling_censer.CenserForSequenceClassification",
+        },
         "name": "Censer.1",
         "vocab_size": model_cfg["vocab_size"],
         "n_layers": model_cfg["n_layers"],
@@ -225,11 +282,15 @@ def build_bundle(ckpt: Path, out: Path) -> None:
         "max_chars": int(state.get("max_chars", 500)),
         "answer_ids": tok_meta["answer_ids"],
         "special_tokens": tok_meta["special_tokens"],
+        "num_labels": 2,
+        "id2label": {"0": "safe", "1": "unsafe"},
+        "label2id": {"safe": 0, "unsafe": 1},
         "threshold": 0.5,
     }
     (out / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     shutil.copy2(Path(__file__).parent / "censer.py", out / "censer.py")
+    shutil.copy2(Path(__file__).parent / "modeling_censer.py", out / "modeling_censer.py")
     (out / "README.md").write_text(MODEL_CARD, encoding="utf-8")
 
 
