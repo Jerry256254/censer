@@ -7,7 +7,8 @@ Usage:
     censer.1 --help
 
 Expects censer.py, model.safetensors, config.json and tokenizer.json next to
-this file. Get them all with:
+this file (they are found automatically, whatever the current directory is).
+Get them all with:
 
     hf download KucLab/Censer.1 --local-dir .
 
@@ -17,9 +18,13 @@ Requires: torch, tokenizers, safetensors  (pip install torch tokenizers safetens
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 
 from censer import main
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    argv = sys.argv[1:]
+    if not any(a == "--model-dir" or a.startswith("--model-dir=") for a in argv):
+        argv = ["--model-dir", HERE] + argv
+    main(argv)
