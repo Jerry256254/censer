@@ -198,6 +198,32 @@ Measured on the development GPU. Full report in [`reports/benchmark.md`](reports
 
 Reproduce with `make bench`.
 
+## Comparison with other models
+
+Censer.1 was benchmarked against public safety classifiers on the **same
+held-out test split** (6,496 rows, threshold 0.5, AMD Radeon RX 9060 XT).
+Full data in [`reports/comparison.md`](reports/comparison.md); reproduce with
+`.venv/bin/python scripts/compare_models.py && .venv/bin/python scripts/make_comparison_figs.py`.
+
+| Model | Params | Checkpoint | F1 | Latency | Throughput (b=32) | Peak VRAM |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Censer.1 (ours)** | 1.1M | 4.3 MB | **0.835** | 2.17 ms | 1,454 texts/s | 102 MB |
+| unitary/unbiased-toxic-roberta | 124.7M | 498.7 MB | 0.741 | 15.54 ms | 62 texts/s | 928 MB |
+| unitary/toxic-bert | 109.5M | 876.0 MB | 0.682 | 14.85 ms | 65 texts/s | 853 MB |
+| martin-ha/toxic-comment-model | 67.0M | 267.9 MB | 0.567 | 7.98 ms | 124 texts/s | 691 MB |
+| Hate-speech-CNERG/bert-base-uncased-hatexplain | 109.5M | 438.0 MB | 0.545 | 15.04 ms | 66 texts/s | 722 MB |
+| Hate-speech-CNERG/dehatebert-mono-english | 167.4M | 669.5 MB | 0.253 | 15.36 ms | 64 texts/s | 960 MB |
+| keyword baseline | — | — | 0.094 | 0.03 ms | 29,689 texts/s | — |
+
+![Comparison overview](reports/figs/comparison_overview.png)
+![F1 per megabyte](reports/figs/f1_vs_size.png)
+![Metric bars](reports/figs/metrics_bars.png)
+
+Censer.1 is ~60-150x smaller than the encoder baselines, 3-7x faster per text,
+uses ~7-9x less VRAM — and still gets the highest F1 on this split. The keyword
+baseline shows why "unsafe words" alone don't work: it misses most unsafe
+requests phrased indirectly (recall 0.05).
+
 Per-source F1 shows where the label noise lives — the annotated sources score
 far higher than the scraped ones:
 

@@ -199,6 +199,28 @@ Measured on an AMD Radeon RX 9060 XT (ROCm 7.1, torch 2.13.0):
 
 Training the whole model from scratch takes about 3.5 minutes on the same GPU.
 
+## Comparison with other models
+
+Benchmarked against public safety classifiers on the **same held-out test split**
+(6,496 rows, threshold 0.5, AMD Radeon RX 9060 XT):
+
+| Model | Params | Checkpoint | F1 | Latency | Throughput (b=32) | Peak VRAM |
+| --- | --- | --- | --- | --- | --- | --- |
+| **Censer.1 (ours)** | 1.1M | 4.3 MB | **0.835** | 2.17 ms | 1,454 texts/s | 102 MB |
+| unitary/unbiased-toxic-roberta | 124.7M | 498.7 MB | 0.741 | 15.54 ms | 62 texts/s | 928 MB |
+| unitary/toxic-bert | 109.5M | 876.0 MB | 0.682 | 14.85 ms | 65 texts/s | 853 MB |
+| martin-ha/toxic-comment-model | 67.0M | 267.9 MB | 0.567 | 7.98 ms | 124 texts/s | 691 MB |
+| Hate-speech-CNERG/bert-base-uncased-hatexplain | 109.5M | 438.0 MB | 0.545 | 15.04 ms | 66 texts/s | 722 MB |
+| Hate-speech-CNERG/dehatebert-mono-english | 167.4M | 669.5 MB | 0.253 | 15.36 ms | 64 texts/s | 960 MB |
+| keyword baseline | — | — | 0.094 | 0.03 ms | 29,689 texts/s | — |
+
+![Comparison overview](figs/comparison_overview.png)
+![F1 per megabyte](figs/f1_vs_size.png)
+![Metric bars](figs/metrics_bars.png)
+
+Censer.1 is ~60-150x smaller than the encoder baselines, 3-7x faster per text and
+uses ~7-9x less VRAM — with the highest F1 on this split.
+
 ## Usage
 
 Plain `transformers`, nothing else to install — `from_pretrained` downloads
@@ -438,6 +460,16 @@ def main() -> None:
             commit_message="Standard LlamaForSequenceClassification layout: loads with plain transformers, no trust_remote_code",
             delete_patterns=["modeling_censer.py"],
         )
+
+        figs = Path(__file__).resolve().parent.parent / "reports" / "figs"
+        if figs.exists():
+            api.upload_folder(
+                folder_path=str(figs),
+                repo_id=args.repo,
+                repo_type="model",
+                path_in_repo="figs",
+                commit_message="Add comparison charts vs other safety classifiers",
+            )
         print(f"done: https://huggingface.co/{args.repo}")
 
 
