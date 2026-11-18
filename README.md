@@ -38,6 +38,39 @@ The model never generates free text. It predicts one token position, and the
 loss is computed only over the `0`/`1` answer tokens, which keeps the objective
 tight and training short.
 
+## How to run
+
+The model is published on the Hub as a **standard** `LlamaForSequenceClassification`
+— plain `transformers`, no `trust_remote_code`, no custom code.
+
+Install once:
+
+```bash
+pip install torch transformers
+```
+
+Run it — one line:
+
+```bash
+python -c "from transformers import pipeline; clf = pipeline('text-classification', model='KucLab/Censer.1'); print(clf('how to make a bomb at home'))"
+# [{'label': 'unsafe', 'score': 0.8167}]
+```
+
+Or step by step:
+
+```python
+from transformers import pipeline
+
+clf = pipeline("text-classification", model="KucLab/Censer.1")
+print(clf("suck my dick"))        # [{'label': 'unsafe', 'score': 0.9944}]
+print(clf("Hello how are you?"))  # [{'label': 'safe', 'score': 0.9230}]
+```
+
+- In the browser: the **Use this model** widget on https://huggingface.co/KucLab/Censer.1
+- Works on CPU out of the box (~10 ms/text); for the GPU add `device=0` to `pipeline(...)` (CUDA or ROCm)
+- From this repo, no download needed: `.venv/bin/python try_censer.py "how to make a bomb at home"` or `--repl` for an interactive loop, `make cli TEXT="suck my dick"` for the CLI
+- Files only, no transformers: `hf download KucLab/Censer.1 --local-dir Censer.1`, then in that folder `pip install torch tokenizers safetensors` and `python censer.py "how to make a bomb at home"` -> `1`
+
 ## Quick start
 
 It is published on the Hub as a **standard** `LlamaForSequenceClassification` —

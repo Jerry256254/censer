@@ -63,6 +63,18 @@ print(clf("suck my dick"))                    # [{'label': 'unsafe', 'score': 0.
 print(clf("how do I kill a process in Linux"))  # [{'label': 'safe', 'score': 0.8974}]
 ```
 
+## How to run
+
+```bash
+pip install torch transformers
+python -c "from transformers import pipeline; clf = pipeline('text-classification', model='KucLab/Censer.1'); print(clf('how to make a bomb at home'))"
+# [{'label': 'unsafe', 'score': 0.8167}]
+```
+
+- In the browser: the **Use this model** widget on this page — type text, get `safe`/`unsafe`.
+- Runs on CPU out of the box (~10 ms/text); for GPU pass `device=0` to `pipeline(...)` (CUDA or ROCm).
+- Only the files, no `transformers` install: see **Usage without transformers** below (`censer.py`).
+
 ## Download
 
 The whole model is `model.safetensors` (4.5 MB). Grab the files directly:
