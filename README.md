@@ -31,7 +31,7 @@ random weights and trained on safety-labelled data.
 | Positions | RoPE |
 | Norm | RMSNorm (pre-norm) |
 | MLP | SwiGLU |
-| Head | tied embeddings, 2-way answer logits |
+| Head | `score` layer = tied-embedding rows of the answer tokens `0`/`1` |
 | Checkpoint size | 4.3 MB (fp32) |
 
 The model never generates free text. It predicts one token position, and the
@@ -40,23 +40,31 @@ tight and training short.
 
 ## Quick start
 
-It is published on the Hub and loads with plain `transformers`:
+It is published on the Hub as a **standard** `LlamaForSequenceClassification` —
+it loads with plain `transformers`, no `trust_remote_code` and no custom code,
+and the "Use this model" widget on the Hub page runs it directly:
 
 ```python
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 repo = "KucLab/Censer.1"
-tok = AutoTokenizer.from_pretrained(repo, trust_remote_code=True)
-model = AutoModelForSequenceClassification.from_pretrained(repo, trust_remote_code=True).eval()
+tok = AutoTokenizer.from_pretrained(repo)
+model = AutoModelForSequenceClassification.from_pretrained(repo).eval()
 
 with torch.no_grad():
     probs = model(**tok("how to make a bomb at home", return_tensors="pt")).logits.softmax(-1)[0]
 print(probs)                  # tensor([0.1833, 0.8167]) -> [safe, unsafe]
 ```
 
-`trust_remote_code=True` is needed because the architecture is custom; the
-repository ships `modeling_censer.py`.
+Or one line with the high-level pipeline:
+
+```python
+from transformers import pipeline
+
+clf = pipeline("text-classification", model="KucLab/Censer.1")
+print(clf("how to make a bomb at home"))   # [{'label': 'unsafe', 'score': 0.8167}]
+```
 
 To train it yourself:
 

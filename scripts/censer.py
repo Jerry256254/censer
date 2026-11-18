@@ -3,11 +3,11 @@
 Copy this file next to the downloaded weights, install torch and tokenizers,
 and you are ready:
 
-    pip install torch tokenizers huggingface_hub
+    pip install torch tokenizers safetensors
     python censer.py "how to make a bomb at home"
 
 It expects, in the same directory:
-    model.safetensors
+    model.safetensors   (standard LlamaForSequenceClassification layout)
     tokenizer.json
     config.json
 """
@@ -155,6 +155,46 @@ class Censer(nn.Module):
         return logits.softmax(-1)[:, 1]
 
 
+def remap_hf_state(state: dict) -> dict:
+    """Standard Llama-layout safetensors -> training-layout state dict."""
+    import re
+
+    out = {"embed.weight": state["model.embed_tokens.weight"]}
+    layer_ids = sorted({int(m.group(1)) for k in state if (m := re.match(r"model\.layers\.(\d+)\.", k))})
+    for i in layer_ids:
+        p, b = f"model.layers.{i}.", f"blocks.{i}."
+        qkv = torch.cat(
+            [state[p + "self_attn.q_proj.weight"], state[p + "self_attn.k_proj.weight"], state[p + "self_attn.v_proj.weight"]],
+            dim=0,
+        )
+        out[b + "attn.qkv.weight"] = qkv.contiguous()
+        out[b + "attn.proj.weight"] = state[p + "self_attn.o_proj.weight"]
+        out[b + "mlp.gate.weight"] = state[p + "mlp.gate_proj.weight"]
+        out[b + "mlp.up.weight"] = state[p + "mlp.up_proj.weight"]
+        out[b + "mlp.down.weight"] = state[p + "mlp.down_proj.weight"]
+        out[b + "norm1.weight"] = state[p + "input_layernorm.weight"]
+        out[b + "norm2.weight"] = state[p + "post_attention_layernorm.weight"]
+    out["norm.weight"] = state["model.norm.weight"]
+    return out
+
+
+def internal_cfg(cfg: dict) -> dict:
+    """config.json (Llama layout) -> the dict the Censer module expects."""
+    return {
+        "vocab_size": cfg["vocab_size"],
+        "n_layers": cfg["num_hidden_layers"],
+        "n_heads": cfg["num_attention_heads"],
+        "d_model": cfg["hidden_size"],
+        "d_ff": cfg["intermediate_size"],
+        "max_seq_len": cfg["max_position_embeddings"],
+        "dropout": cfg.get("dropout", 0.0),
+        "tie_embeddings": True,
+        "pad_id": cfg.get("pad_token_id", 0),
+        "answer_ids": cfg["answer_ids"],
+        "max_chars": cfg.get("max_chars", 500),
+    }
+
+
 class CenserPipeline:
     """Text in, "1" (unsafe) or "0" (safe) out."""
 
@@ -162,7 +202,7 @@ class CenserPipeline:
         from safetensors.torch import load_file
 
         directory = Path(directory)
-        self.cfg = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+        self.cfg = internal_cfg(json.loads((directory / "config.json").read_text(encoding="utf-8")))
         self.tok = Tokenizer.from_file(str(directory / "tokenizer.json"))
         self.pad_id = self.tok.token_to_id(PAD)
         self.bos_id = self.tok.token_to_id(BOS)
@@ -171,11 +211,9 @@ class CenserPipeline:
         self.threshold = threshold
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         self.model = Censer(self.cfg)
-        state = load_file(directory / "model.safetensors")
-        if self.cfg["tie_embeddings"]:
-            state.pop("lm_head.weight", None)
+        state = remap_hf_state(load_file(directory / "model.safetensors"))
         missing, unexpected = self.model.load_state_dict(state, strict=False)
-        missing = [k for k in missing if not (self.cfg["tie_embeddings"] and k == "lm_head.weight")]
+        missing = [k for k in missing if k != "lm_head.weight"]  # tied to embed.weight
         if missing or unexpected:
             raise RuntimeError(f"weight mismatch: missing={missing} unexpected={unexpected}")
         self.model.to(self.device).eval()

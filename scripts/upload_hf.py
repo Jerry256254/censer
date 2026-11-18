@@ -1,4 +1,12 @@
-"""Upload the trained model to the Hugging Face Hub."""
+"""Upload the trained model to the Hugging Face Hub.
+
+The checkpoint is exported as a *standard* ``LlamaForSequenceClassification``
+(the Censer architecture is exactly Llama: RoPE, RMSNorm, SwiGLU, tied
+embeddings, fused QKV). The classification head ``score`` is initialised from
+the embedding rows of the answer tokens "0"/"1", so predictions are identical
+to the training code — and the model loads with plain ``transformers``, no
+``trust_remote_code`` and no custom files.
+"""
 
 from __future__ import annotations
 
@@ -20,7 +28,6 @@ tags:
 - content-moderation
 - tiny-language-model
 - from-scratch
-- custom-code
 language:
 - en
 license: apache-2.0
@@ -39,7 +46,22 @@ metrics:
 # Censer.1
 
 A 1.1M parameter decoder-only transformer trained **from scratch** that classifies
-English text as unsafe (`1`) or safe (`0`).
+English text as unsafe (`unsafe`) or safe (`safe`).
+
+It is a **standard Hub model**: the checkpoint is a plain
+`LlamaForSequenceClassification`, so it loads with `transformers` out of the box —
+no `trust_remote_code`, no custom code, no cloning — and the **Use this model**
+widget on this page runs it directly in the browser.
+
+```python
+from transformers import pipeline
+
+clf = pipeline("text-classification", model="KucLab/Censer.1")
+print(clf("how to make a bomb at home"))      # [{'label': 'unsafe', 'score': 0.8167}]
+print(clf("Hello how are you?"))              # [{'label': 'safe', 'score': 0.9229}]
+print(clf("suck my dick"))                    # [{'label': 'unsafe', 'score': 0.9944}]
+print(clf("how do I kill a process in Linux"))  # [{'label': 'safe', 'score': 0.8974}]
+```
 
 ## Download
 
@@ -50,6 +72,7 @@ The whole model is `model.safetensors` (4.5 MB). Grab the files directly:
 | **model.safetensors** | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/model.safetensors?download=true) |
 | config.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/config.json?download=true) |
 | tokenizer.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/tokenizer.json?download=true) |
+| tokenizer_config.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/tokenizer_config.json?download=true) |
 | censer.py | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/censer.py?download=true) |
 
 Or fetch everything at once:
@@ -67,32 +90,35 @@ trained on safety-labelled data, with a custom byte-level BPE tokenizer. The mod
 predicts a single answer token and never generates free text.
 
 ```
-"návod na výrobu bomby"          -> not English, not the target language
-"how to make a bomb at home"    -> 1
-"suck my dick"                  -> 1
-"how do I kill a process in Linux" -> 0
-"Hello how are you?"            -> 0
+"how to make a bomb at home"      -> unsafe
+"suck my dick"                    -> unsafe
+"how do I kill a process in Linux" -> safe
+"Hello how are you?"              -> safe
 ```
 
 ## Model details
 
 | Property | Value |
 | --- | --- |
+| Architecture | `LlamaForSequenceClassification` (standard transformers) |
 | Parameters | 1,115,264 |
 | Layers | 4 |
 | d_model / heads / d_ff | 128 / 4 / 384 |
 | Context length | 160 tokens (input truncated at 500 characters) |
 | Tokenizer | byte-level BPE, 2048 tokens, trained on the corpus |
-| Positions | RoPE |
-| Norm | RMSNorm (pre-norm) |
+| Positions | RoPE (theta 10000) |
+| Norm | RMSNorm (pre-norm, eps 1e-5) |
 | MLP | SwiGLU |
-| Head | tied embeddings, two answer logits |
+| Head | `score` linear layer = embedding rows of the answer tokens `0`/`1` |
 | Checkpoint size | 4.3 MB (fp32) |
 
 ## Prompt format
 
+The tokenizer bakes the template into its post-processor, so plain
+`tokenizer(text)` already produces:
+
 ```
-[BOS][USER] <text> [ASSISTANT] -> 0 or 1
+[BOS][USER] <text> [ASSISTANT] -> answer logits over tokens "0"/"1"
 ```
 
 Text is truncated at 500 characters before tokenisation.
@@ -139,8 +165,8 @@ Training the whole model from scratch takes about 3.5 minutes on the same GPU.
 
 ## Usage
 
-Works like any other text-classification model on the Hub — `from_pretrained`
-downloads everything by itself, no cloning and no manual files.
+Plain `transformers`, nothing else to install — `from_pretrained` downloads
+everything by itself:
 
 ```bash
 pip install torch transformers
@@ -151,8 +177,8 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 repo = "KucLab/Censer.1"
-tok = AutoTokenizer.from_pretrained(repo, trust_remote_code=True)
-model = AutoModelForSequenceClassification.from_pretrained(repo, trust_remote_code=True).eval()
+tok = AutoTokenizer.from_pretrained(repo)
+model = AutoModelForSequenceClassification.from_pretrained(repo).eval()
 
 text = "how to make a bomb at home"
 with torch.no_grad():
@@ -162,15 +188,12 @@ print(probs)                     # tensor([0.1833, 0.8167]) -> [safe, unsafe]
 print(model.config.id2label)     # {0: 'safe', 1: 'unsafe'}
 ```
 
-`trust_remote_code=True` is required because the architecture is custom; the
-repository ships `modeling_censer.py`, so there is nothing else to install.
-
 Or with the high-level pipeline:
 
 ```python
 from transformers import pipeline
 
-clf = pipeline("text-classification", model="KucLab/Censer.1", trust_remote_code=True)
+clf = pipeline("text-classification", model="KucLab/Censer.1")
 print(clf("how to make a bomb at home"))
 # [{'label': 'unsafe', 'score': 0.8167}]
 print(clf("Hello how are you?"))
@@ -180,7 +203,9 @@ print(clf("Hello how are you?"))
 ## Usage without transformers
 
 The repository is also self-contained on its own: `model.safetensors`,
-`config.json`, `tokenizer.json` and `censer.py`.
+`config.json`, `tokenizer.json` and `censer.py`. The weights are stored in the
+standard Llama layout; `censer.py` maps them back internally, so it only needs
+`torch`, `tokenizers` and `safetensors`:
 
 ```bash
 hf download KucLab/Censer.1 --local-dir Censer.1
@@ -207,90 +232,132 @@ Files:
 
 | File | Purpose |
 | --- | --- |
-| `model.safetensors` | weights only, 4.3 MB |
-| `config.json` | architecture and inference settings |
-| `tokenizer.json` | byte-level BPE, 2048 tokens |
-| `censer.py` | standalone model + inference, no repo needed |
+| `model.safetensors` | weights in standard Llama layout, 4.3 MB |
+| `config.json` | standard `LlamaForSequenceClassification` config |
+| `tokenizer.json` / `tokenizer_config.json` | byte-level BPE, 2048 tokens, prompt template baked in |
+| `censer.py` | standalone inference (torch + tokenizers only), no repo needed |
 
-`censer.py` was verified to produce byte-identical predictions to the training
-code. Runs on CPU or CUDA/ROCm; pass `device="cpu"` to force CPU.
+`censer.py` was verified to produce predictions identical to the training code.
+Runs on CPU or CUDA/ROCm; pass `device="cpu"` to force CPU.
 
 ## Limitations
 
-- **English only.** Other languages mostly score `0`.
+- **English only.** Other languages mostly score safe.
 - Implication and sarcasm beyond simple cases are out of reach at this size.
 - Weak against jailbreak-style prompts (lowest per-source score).
 - A moderation signal, not a safety guarantee.
 """
 
 
-def write_tokenizer(src: Path, dst: Path, meta: dict) -> None:
+def to_llama_state_dict(state: dict, answer_ids: list[int]) -> dict:
+    """Map the training checkpoint onto standard LlamaForSequenceClassification keys."""
+    model = state["model"]
+    cfg = state["model_config"]
+    d = cfg["d_model"]
+    n_layers = cfg["n_layers"]
+
+    out = {"model.embed_tokens.weight": model["embed.weight"].contiguous()}
+    for i in range(n_layers):
+        p = f"model.layers.{i}."
+        b = f"blocks.{i}."
+        qkv = model[f"{b}attn.qkv.weight"]
+        out[f"{p}self_attn.q_proj.weight"] = qkv[:d].contiguous()
+        out[f"{p}self_attn.k_proj.weight"] = qkv[d : 2 * d].contiguous()
+        out[f"{p}self_attn.v_proj.weight"] = qkv[2 * d : 3 * d].contiguous()
+        out[f"{p}self_attn.o_proj.weight"] = model[f"{b}attn.proj.weight"].contiguous()
+        out[f"{p}mlp.gate_proj.weight"] = model[f"{b}mlp.gate.weight"].contiguous()
+        out[f"{p}mlp.up_proj.weight"] = model[f"{b}mlp.up.weight"].contiguous()
+        out[f"{p}mlp.down_proj.weight"] = model[f"{b}mlp.down.weight"].contiguous()
+        out[f"{p}input_layernorm.weight"] = model[f"{b}norm1.weight"].contiguous()
+        out[f"{p}post_attention_layernorm.weight"] = model[f"{b}norm2.weight"].contiguous()
+    out["model.norm.weight"] = model["norm.weight"].contiguous()
+    # The two answer logits are the tied-embedding logits of tokens "0" and "1".
+    out["score.weight"] = model["embed.weight"][list(answer_ids)].clone().contiguous()
+    return out
+
+
+def llama_config(state: dict, tok_meta: dict, tok_ids: dict) -> dict:
+    mc = dict(state["model_config"])
+    mc.pop("answer_ids", None)
+    return {
+        "architectures": ["LlamaForSequenceClassification"],
+        "model_type": "llama",
+        "num_labels": 2,
+        "id2label": {"0": "safe", "1": "unsafe"},
+        "label2id": {"safe": 0, "unsafe": 1},
+        "vocab_size": mc["vocab_size"],
+        "hidden_size": mc["d_model"],
+        "intermediate_size": mc["d_ff"],
+        "num_hidden_layers": mc["n_layers"],
+        "num_attention_heads": mc["n_heads"],
+        "num_key_value_heads": mc["n_heads"],
+        "head_dim": mc["d_model"] // mc["n_heads"],
+        "max_position_embeddings": mc["max_seq_len"],
+        "rms_norm_eps": 1e-5,
+        "rope_parameters": {"rope_type": "default", "rope_theta": 10000.0},
+        "attention_bias": False,
+        "mlp_bias": False,
+        "tie_word_embeddings": True,
+        "pad_token_id": mc["pad_id"],
+        "bos_token_id": tok_ids["[BOS]"],
+        "eos_token_id": tok_ids["[ASSISTANT]"],
+        # Censer-specific metadata, kept for the standalone censer.py:
+        "name": state.get("name", "Censer.1"),
+        "max_chars": int(state.get("max_chars", 500)),
+        "answer_ids": list(tok_meta["answer_ids"]),
+        "special_tokens": list(tok_meta["special_tokens"]),
+        "threshold": 0.5,
+    }
+
+
+def write_tokenizer(src: Path, dst: Path) -> dict:
     """Ship the tokenizer with the prompt template baked in, so AutoTokenizer
-    produces exactly [BOS][USER] text [ASSISTANT]."""
+    produces exactly [BOS][USER] text [ASSISTANT]. Returns the special-token ids."""
     from tokenizers import Tokenizer
     from tokenizers.processors import TemplateProcessing
 
     tok = Tokenizer.from_file(str(src))
-    ids = {name: tok.token_to_id(name) for name in ("[BOS]", "[USER]", "[ASSISTANT]")}
+    ids = {name: tok.token_to_id(name) for name in ("[PAD]", "[BOS]", "[USER]", "[ASSISTANT]")}
     tok.post_processor = TemplateProcessing(
         single="[BOS] [USER] $A [ASSISTANT]",
         special_tokens=[("[BOS]", ids["[BOS]"]), ("[USER]", ids["[USER]"]), ("[ASSISTANT]", ids["[ASSISTANT]"])],
     )
     tok.save(str(dst))
+    return ids
+
+
+def write_tokenizer_config(dst: Path, ids: dict) -> None:
+    cfg = {
+        "tokenizer_class": "PreTrainedTokenizerFast",
+        "pad_token": "[PAD]",
+        "bos_token": "[BOS]",
+        "eos_token": "[ASSISTANT]",
+    }
+    dst.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
 def build_bundle(ckpt: Path, out: Path) -> None:
-    """Write a self-contained, transformers-compatible model directory."""
+    """Write a self-contained, standard-transformers model directory."""
     import torch
     from safetensors.torch import save_file
 
     out.mkdir(parents=True, exist_ok=True)
     state = torch.load(ckpt, map_location="cpu", weights_only=False)
 
-    model_cfg = dict(state["model_config"])
-    model_cfg.pop("answer_ids", None)
-
-    tensors = {
-        k: v.contiguous() for k, v in state["model"].items() if not k.endswith("answer_id_tensor")
-    }
-    if "lm_head.weight" in tensors and "embed.weight" in tensors:
-        if tensors["lm_head.weight"].data_ptr() == tensors["embed.weight"].data_ptr():
-            tensors["lm_head.weight"] = tensors["lm_head.weight"].clone()
-    save_file(tensors, str(out / "model.safetensors"), metadata={"format": "pt"})
-
     tok_dir = ckpt.parent / "tokenizer"
     tok_meta = json.loads((tok_dir / "meta.json").read_text(encoding="utf-8"))
-    write_tokenizer(tok_dir / "tokenizer.json", out / "tokenizer.json", tok_meta)
+    answer_ids = list(tok_meta["answer_ids"])
 
-    config = {
-        "architectures": ["CenserForSequenceClassification"],
-        "model_type": "censer",
-        "auto_map": {
-            "AutoConfig": "modeling_censer.CenserConfig",
-            "AutoModelForSequenceClassification": "modeling_censer.CenserForSequenceClassification",
-        },
-        "name": "Censer.1",
-        "vocab_size": model_cfg["vocab_size"],
-        "n_layers": model_cfg["n_layers"],
-        "n_heads": model_cfg["n_heads"],
-        "d_model": model_cfg["d_model"],
-        "d_ff": model_cfg["d_ff"],
-        "max_seq_len": model_cfg["max_seq_len"],
-        "dropout": model_cfg["dropout"],
-        "tie_embeddings": model_cfg["tie_embeddings"],
-        "pad_id": model_cfg["pad_id"],
-        "max_chars": int(state.get("max_chars", 500)),
-        "answer_ids": tok_meta["answer_ids"],
-        "special_tokens": tok_meta["special_tokens"],
-        "num_labels": 2,
-        "id2label": {"0": "safe", "1": "unsafe"},
-        "label2id": {"safe": 0, "unsafe": 1},
-        "threshold": 0.5,
-    }
+    tensors = to_llama_state_dict(state, answer_ids)
+    save_file(tensors, str(out / "model.safetensors"), metadata={"format": "pt"})
+
+    ids = write_tokenizer(tok_dir / "tokenizer.json", out / "tokenizer.json")
+    write_tokenizer_config(out / "tokenizer_config.json", ids)
+
+    config = llama_config(state, tok_meta, ids)
     (out / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     shutil.copy2(Path(__file__).parent / "censer.py", out / "censer.py")
-    shutil.copy2(Path(__file__).parent / "modeling_censer.py", out / "modeling_censer.py")
     (out / "README.md").write_text(MODEL_CARD, encoding="utf-8")
 
 
@@ -326,7 +393,8 @@ def main() -> None:
             folder_path=str(bundle),
             repo_id=args.repo,
             repo_type="model",
-            commit_message="Upload Censer.1",
+            commit_message="Standard LlamaForSequenceClassification layout: loads with plain transformers, no trust_remote_code",
+            delete_patterns=["modeling_censer.py"],
         )
         print(f"done: https://huggingface.co/{args.repo}")
 

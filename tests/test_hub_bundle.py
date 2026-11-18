@@ -45,10 +45,11 @@ def test_config_matches_model(bundle):
 
     out, _ = bundle
     cfg = json.loads((out / "config.json").read_text())
+    assert cfg["model_type"] == "llama"
     assert cfg["answer_ids"] and len(cfg["answer_ids"]) == 2
     assert cfg["vocab_size"] > cfg["answer_ids"][1]
     assert cfg["max_chars"] > 0
-    assert cfg["pad_id"] >= 0
+    assert cfg.get("pad_token_id", cfg.get("pad_id")) >= 0
 
 
 def test_standalone_matches_repo_predictions(bundle):
