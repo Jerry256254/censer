@@ -40,6 +40,28 @@ tight and training short.
 
 ## How to run
 
+### The `censer.1` command — interactive terminal UI
+
+Install this repo as a package, then just run `censer.1`:
+
+```bash
+pip install "git+https://github.com/Jerry256254/censer.git"
+censer.1                          # opens the UI: type a phrase, Enter -> safe/unsafe + score
+censer.1 "how to make a bomb at home"   # one-shot: unsafe 0.8167
+```
+
+Or from the Hub files only (no git clone, just `torch` + `tokenizers` + `safetensors`):
+
+```bash
+pip install torch tokenizers safetensors huggingface_hub
+hf download KucLab/Censer.1 --local-dir ~/.local/share/censer1
+chmod +x ~/.local/share/censer1/censer.1
+ln -s ~/.local/share/censer1/censer.1 ~/.local/bin/censer.1   # put it on your PATH
+censer.1
+```
+
+### One-liner with plain `transformers`
+
 The model is published on the Hub as a **standard** `LlamaForSequenceClassification`
 — plain `transformers`, no `trust_remote_code`, no custom code.
 

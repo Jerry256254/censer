@@ -5,6 +5,9 @@ description = "Censer .1 - a tiny from-scratch LLM that classifies English text 
 requires-python = ">=3.12"
 dependencies = [
     "torch>=2.9",
+    "transformers>=4.45",
+    "huggingface_hub>=0.24",
+    "safetensors>=0.4",
     "datasets>=3.0",
     "tokenizers>=0.20",
     "numpy>=1.26",
@@ -15,6 +18,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 kuclab-cneser = "kuclab.cli:main"
+"censer.1" = "kuclab.cli:ui_main"
 
 [build-system]
 requires = ["hatchling"]

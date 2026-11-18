@@ -37,7 +37,31 @@ def bundle(tmp_path_factory):
 
 def test_bundle_has_all_required_files(bundle):
     out, _ = bundle
-    assert {"model.safetensors", "config.json", "tokenizer.json", "censer.py"} <= set(p.name for p in out.iterdir())
+    assert {"model.safetensors", "config.json", "tokenizer.json", "censer.py", "censer.1"} <= set(
+        p.name for p in out.iterdir()
+    )
+
+
+def test_censer1_launcher_is_executable_shebang_script(bundle):
+    out, _ = bundle
+    launcher = out / "censer.1"
+    content = launcher.read_text()
+    assert content.startswith("#!")
+    assert "from censer import main" in content
+    assert launcher.stat().st_mode & 0o111, "censer.1 must be executable in the bundle"
+
+
+def test_standalone_repl_classifies_until_exit(bundle, monkeypatch, capsys):
+    out, _ = bundle
+    standalone = load_standalone()
+    answers = iter(["hello there friend", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    with pytest.raises(SystemExit) as exc:
+        standalone.main(["--model-dir", str(out)])
+    captured = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert "interactive terminal UI" in captured
+    assert "safe" in captured and "hello there friend" in captured
 
 
 def test_config_matches_model(bundle):

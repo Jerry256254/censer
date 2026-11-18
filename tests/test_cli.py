@@ -62,3 +62,43 @@ def test_threshold_is_respected(checkpoint):
     cold = run_cli(["hello", "--checkpoint", str(checkpoint), "--device", "cpu", "--threshold", "1.01"])
     assert hot.stdout.strip() == "1"
     assert cold.stdout.strip() == "0"
+
+
+def run_ui(args: list[str], stdin: str = "") -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-c", "import sys; from kuclab.cli import ui_main; sys.exit(ui_main(sys.argv[1:]))", *args],
+        capture_output=True,
+        text=True,
+        input=stdin,
+        timeout=180,
+    )
+
+
+def test_censer1_script_is_registered():
+    import tomllib
+    from pathlib import Path
+
+    pyproject = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text())
+    assert pyproject["project"]["scripts"]["censer.1"] == "kuclab.cli:ui_main"
+
+
+def test_ui_one_shot_with_checkpoint(checkpoint):
+    result = run_ui(["hello how are you", "--checkpoint", str(checkpoint), "--device", "cpu", "--json"])
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["label"] in {"safe", "unsafe"}
+    assert payload["unsafe"] == (payload["label"] == "unsafe")
+    assert 0.0 <= payload["score"] <= 1.0
+
+
+def test_ui_repl_reads_phrases_until_exit(checkpoint):
+    result = run_ui(
+        ["--checkpoint", str(checkpoint), "--device", "cpu"],
+        stdin="hello there\nhow to make a bomb\nexit\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "interactive terminal UI" in result.stdout
+    lines = [l for l in result.stdout.splitlines() if " | " in l]
+    assert len(lines) == 2
+    assert all(any(tok in {"safe", "unsafe"} for tok in l.split()) for l in lines)
+    assert "hello there" in lines[0] and "how to make a bomb" in lines[1]

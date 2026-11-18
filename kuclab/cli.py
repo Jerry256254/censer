@@ -40,6 +40,97 @@ def run_repl(model: SafetyModel) -> int:
         print(verdict.label)
 
 
+def _color(text: str, code: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
+
+class HubClassifier:
+    """The published model from the Hub, loaded with plain transformers."""
+
+    def __init__(self, repo: str = "KucLab/Censer.1", device: str | None = None) -> None:
+        import torch
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        self._torch = torch
+        self.tok = AutoTokenizer.from_pretrained(repo)
+        self.model = AutoModelForSequenceClassification.from_pretrained(repo).eval()
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.model.to(device)
+        self.device = device
+
+    def predict(self, text: str) -> tuple[str, float]:
+        """Returns (label 'safe'/'unsafe', probability of unsafe)."""
+        with self._torch.no_grad():
+            enc = self.tok(text, return_tensors="pt")
+            enc = {k: v.to(self.model.device) for k, v in enc.items()}
+            probs = self.model(**enc).logits.softmax(-1)[0]
+        label = self.model.config.id2label[int(probs.argmax())]
+        return label, float(probs[1])
+
+
+def run_ui(predict, source: str) -> int:
+    """Small interactive terminal UI: phrase in, safe/unsafe + score out."""
+    print(f"Censer.1 - interactive terminal UI  [{source}]")
+    print("Type a phrase, Enter to classify. 'exit' to quit.\n")
+    while True:
+        try:
+            line = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        text = line.strip()
+        if text.lower() in {"exit", "quit", ":q"}:
+            return 0
+        if not text:
+            continue
+        label, prob = predict(text)
+        colored = _color(f"{label:6s}", "31" if label == "unsafe" else "32")
+        print(f"{colored} {prob:.4f} | {text}")
+
+
+def ui_main(argv: list[str] | None = None) -> int:
+    """Entry point for the `censer.1` command."""
+    parser = argparse.ArgumentParser(
+        prog="censer.1",
+        description="Censer.1 terminal UI: classify English text as safe/unsafe. "
+        "Run without arguments for the interactive UI.",
+    )
+    parser.add_argument("text", nargs="*", help="phrase to classify once; omit to open the interactive UI")
+    parser.add_argument("--repo", default="KucLab/Censer.1", help="Hub repo id of the model")
+    parser.add_argument("--checkpoint", default=None, help="use a local training checkpoint instead of the Hub model")
+    parser.add_argument("--device", default=None, help="cuda / cpu (default: auto)")
+    parser.add_argument("--json", action="store_true", help="one-shot JSON output")
+    args = parser.parse_args(argv)
+
+    if args.checkpoint:
+        local = SafetyModel(checkpoint=args.checkpoint, device=args.device)
+
+        def predict(text: str) -> tuple[str, float]:
+            v = local.predict(text)
+            return ("unsafe" if v.is_unsafe else "safe"), v.probability
+
+        source = str(args.checkpoint)
+    else:
+        print(f"loading {args.repo} ...", file=sys.stderr)
+        clf = HubClassifier(args.repo, device=args.device)
+        predict = clf.predict
+        source = f"{args.repo} ({clf.device})"
+
+    text = " ".join(args.text).strip()
+    if text:
+        label, prob = predict(text)
+        if args.json:
+            print(json.dumps({"label": label, "unsafe": label == "unsafe", "score": round(prob, 4)}))
+        else:
+            colored = _color(f"{label:6s}", "31" if label == "unsafe" else "32")
+            print(f"{colored} {prob:.4f}")
+        return 0
+    return run_ui(predict, source)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)

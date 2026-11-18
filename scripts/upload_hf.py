@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -65,6 +66,29 @@ print(clf("how do I kill a process in Linux"))  # [{'label': 'safe', 'score': 0.
 
 ## How to run
 
+### The `censer.1` command — interactive terminal UI
+
+Using only the files in this repo (needs just `torch`, `tokenizers`, `safetensors`):
+
+```bash
+pip install torch tokenizers safetensors huggingface_hub
+hf download KucLab/Censer.1 --local-dir ~/.local/share/censer1
+chmod +x ~/.local/share/censer1/censer.1
+ln -s ~/.local/share/censer1/censer.1 ~/.local/bin/censer.1   # put it on your PATH
+censer.1                          # interactive UI: type a phrase, Enter -> safe/unsafe + score
+censer.1 "how to make a bomb at home"    # one-shot -> unsafe 0.8167
+```
+
+Or install the GitHub package — the same `censer.1` command is installed and loads
+the model from this Hub repo with plain `transformers`:
+
+```bash
+pip install "git+https://github.com/Jerry256254/censer.git"
+censer.1
+```
+
+### One-liner with `transformers`
+
 ```bash
 pip install torch transformers
 python -c "from transformers import pipeline; clf = pipeline('text-classification', model='KucLab/Censer.1'); print(clf('how to make a bomb at home'))"
@@ -73,7 +97,6 @@ python -c "from transformers import pipeline; clf = pipeline('text-classificatio
 
 - In the browser: the **Use this model** widget on this page — type text, get `safe`/`unsafe`.
 - Runs on CPU out of the box (~10 ms/text); for GPU pass `device=0` to `pipeline(...)` (CUDA or ROCm).
-- Only the files, no `transformers` install: see **Usage without transformers** below (`censer.py`).
 
 ## Download
 
@@ -86,6 +109,7 @@ The whole model is `model.safetensors` (4.5 MB). Grab the files directly:
 | tokenizer.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/tokenizer.json?download=true) |
 | tokenizer_config.json | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/tokenizer_config.json?download=true) |
 | censer.py | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/censer.py?download=true) |
+| **censer.1** (launcher) | [download](https://huggingface.co/KucLab/Censer.1/resolve/main/censer.1?download=true) |
 
 Or fetch everything at once:
 
@@ -226,6 +250,8 @@ python censer.py "how to make a bomb at home"     # -> 1
 python censer.py "Hello how are you?"             # -> 0
 python censer.py "suck my dick" --json
 # {"label": "1", "unsafe": true, "score": 0.9944}
+chmod +x censer.1 && ./censer.1                   # interactive UI (the `censer.1` command)
+python censer.py                                  # interactive UI as well, no text argument
 ```
 
 Or use the same file as a library:
@@ -248,6 +274,7 @@ Files:
 | `config.json` | standard `LlamaForSequenceClassification` config |
 | `tokenizer.json` / `tokenizer_config.json` | byte-level BPE, 2048 tokens, prompt template baked in |
 | `censer.py` | standalone inference (torch + tokenizers only), no repo needed |
+| `censer.1` | executable launcher for the interactive terminal UI |
 
 `censer.py` was verified to produce predictions identical to the training code.
 Runs on CPU or CUDA/ROCm; pass `device="cpu"` to force CPU.
@@ -370,6 +397,9 @@ def build_bundle(ckpt: Path, out: Path) -> None:
     (out / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     shutil.copy2(Path(__file__).parent / "censer.py", out / "censer.py")
+    launcher = Path(__file__).parent / "censer.1"
+    shutil.copy2(launcher, out / "censer.1")
+    os.chmod(out / "censer.1", 0o755)
     (out / "README.md").write_text(MODEL_CARD, encoding="utf-8")
 
 

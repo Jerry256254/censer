@@ -5,6 +5,8 @@ and you are ready:
 
     pip install torch tokenizers safetensors
     python censer.py "how to make a bomb at home"
+    python censer.py            # or just run it: interactive UI, phrase in -> verdict out
+    ./censer.1                  # same UI via the censer.1 launcher next to this file
 
 It expects, in the same directory:
     model.safetensors   (standard LlamaForSequenceClassification layout)
@@ -14,8 +16,10 @@ It expects, in the same directory:
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
+import sys
 from pathlib import Path
 
 import torch
@@ -240,21 +244,49 @@ class CenserPipeline:
         ]
 
 
-def main() -> None:
-    import argparse
+def _color(text: str, code: str) -> str:
+    if not sys.stdout.isatty():
+        return text
+    return f"\033[{code}m{text}\033[0m"
 
-    parser = argparse.ArgumentParser(description="Censer.1 safety classifier.")
-    parser.add_argument("text", nargs="*")
+
+def repl(pipe: "CenserPipeline") -> int:
+    """Small interactive terminal UI: phrase in, safe/unsafe + score out."""
+    print("Censer.1 - interactive terminal UI")
+    print("Type a phrase, Enter to classify. 'exit' to quit.\n")
+    while True:
+        try:
+            line = input("> ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        text = line.strip()
+        if text.lower() in {"exit", "quit", ":q"}:
+            return 0
+        if not text:
+            continue
+        v = pipe.predict(text)
+        label = "unsafe" if v["unsafe"] else "safe"
+        colored = _color(f"{label:6s}", "31" if v["unsafe"] else "32")
+        print(f"{colored} {v['score']:.4f} | {text}")
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="censer.1",
+        description="Censer.1 safety classifier (standalone). Run without text to open the interactive UI.",
+    )
+    parser.add_argument("text", nargs="*", help="phrase to classify once; omit to open the interactive UI")
     parser.add_argument("--model-dir", default=".")
     parser.add_argument("--threshold", type=float, default=0.5)
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument("--repl", action="store_true", help="interactive UI (default when no text is given)")
+    args = parser.parse_args(argv)
 
     pipe = CenserPipeline(args.model_dir, args.threshold)
     text = " ".join(args.text).strip()
-    if not text:
-        print("usage: python censer.py \"your text\"")
-        raise SystemExit(2)
+    if args.repl or not text:
+        raise SystemExit(repl(pipe))
     verdict = pipe.predict(text)
     print(json.dumps(verdict) if args.json else verdict["label"])
 
